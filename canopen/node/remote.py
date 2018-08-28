@@ -85,7 +85,7 @@ class RemoteNode(BaseNode):
         self.sdo.download(0x1011, subindex, b"load")
 
     def load_configuration(self):
-        ''' Load the configuration of the node from the object dictionary.'''
+        """ Load the configuration of the node from the object dictionary."""
         for obj in self.object_dictionary.values():
             if isinstance(obj, Record) or isinstance(obj, Array):
                 for subobj in obj.values():
