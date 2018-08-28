@@ -24,8 +24,8 @@ try:
     # node = network[34]
 
     # Reset network
-    # node.nmt.state = 'RESET COMMUNICATION'
-    node.nmt.state = 'RESET'
+    node.nmt.state = 'RESET COMMUNICATION'
+    # node.nmt.state = 'RESET'
     node.nmt.wait_for_bootup(15)
 
     print 'node state 1) = {0}'.format(node.nmt.state)
@@ -52,8 +52,6 @@ try:
     network.sync.start(0.1)
 
     node.load_configuration()
-
-    print 'node state 3) = {0}'.format(node.nmt.state)
 
     node.setup_402_state_machine()
 
@@ -102,6 +100,7 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
+    print 'Node state 5) = {0}'.format(node.powerstate_402.state)
 
     timeout = time.time() + 15
     node.powerstate_402.state = 'SWITCHED ON'
@@ -109,6 +108,7 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
+    print 'Node state 6) = {0}'.format(node.powerstate_402.state)
 
     timeout = time.time() + 15
     node.powerstate_402.state = 'OPERATION ENABLED'
@@ -116,11 +116,15 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
+    print 'Node state 6) = {0}'.format(node.powerstate_402.state)
+
+
 
     print 'Node Status {0}'.format(node.powerstate_402.state)
 
     # -----------------------------------------------------------------------------------------
     node.nmt.start_node_guarding(0.01)
+    
     while True:
         try:
             network.check()
@@ -137,7 +141,7 @@ try:
         print 'statusword: {0}'.format(statusword)
         print 'VEL: {0}'.format(speed)
 
-        time.sleep(0.01)
+        time.sleep(0.001)
 
 except KeyboardInterrupt:
     pass
