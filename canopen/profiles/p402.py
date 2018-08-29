@@ -24,13 +24,25 @@ POWER_STATE_COMMANDS = {
     'QUICK STOP ACTIVE'     : 0x02
 }
 
-COMMAND_TO_POWER_STATE = {
-    0x80: 'SWITCH ON DISABLED',
-    0x06: 'READY TO SWITCH ON',
-    0x07: 'SWITCHED ON',
-    0x0F: 'OPERATION ENABLED',
-    0x02: 'QUICK STOP ACTIVE'
+# homing controlword bit maks
+HOMING_COMMANDS = {
+    'START' : 0x10,
+    'HALT'  : 0x100
 }
+
+# homing statusword bit masks
+HOMING_STATES = {
+    'IN PROGRESS'                           : [0x3400, 0x00],
+    'INTERRUPTED'                           : [0x3400, 0x400], 
+    'ATTAINED TARGET NOT REACHED'           : [0x3400, 0x1000],
+    'SUCCESSFULLY'                          : [0x3400, 0x1400],
+    'ERROR OCCURRED VELOCITY IS NOT ZERO'   : [0x3400, 0x2000],
+    'ERROR OCCURRED VELOCITY IS ZERO'       : [0x3400, 0x2400]
+}
+
+
+
+
 
 
 class Node402(RemoteNode):
@@ -65,6 +77,15 @@ class Node402(RemoteNode):
         self.tpdo[1].enabled = True
         self.tpdo[1].save()
         self.nmt.state = 'OPERATIONAL'
+    
+    def reset_from_fault(self):
+        pass
+
+    def homing(self):
+        pass
+
+    def change_mode(self, mode):
+        pass
 
 
 class PowerStateMachine(object):
