@@ -124,7 +124,7 @@ class PowerStateMachine(object):
             return POWER_STATES_402[self._state]
         else:
             return self._state
-
+    
     @state.setter
     def state(self, new_state):
         if new_state in POWER_STATE_COMMANDS:
@@ -135,3 +135,9 @@ class PowerStateMachine(object):
         # send the control word in a manufacturer agnostic way
         # by not using the EDS ParameterName but the register number
         self.node.sdo[0x6040].raw = code
+        while node.powerstate_402.state != new_state:
+            if time.time() > timeout:
+                raise Exception('Timeout when trying to change state')
+            
+        
+        
