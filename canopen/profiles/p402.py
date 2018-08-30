@@ -3,7 +3,7 @@
 from ..node import RemoteNode
 
 # status word 0x6041 bitmask and values in the list in the dictionary value
-POWER_STATES_402 = {
+POWER_STATES = {
     'NOT READY TO SWITCH ON': [0x4F, 0x00],
     'SWITCH ON DISABLED'    : [0x4F, 0x40],
     'READY TO SWITCH ON'    : [0x6F, 0x21],
@@ -42,9 +42,6 @@ HOMING_STATES = {
 
 
 
-
-
-
 class Node402(RemoteNode):
     """A CANopen CiA 402 profile slave node.
 
@@ -65,18 +62,27 @@ class Node402(RemoteNode):
         # setup TPDO1 for this node
         # TPDO1 will transmit the statusword of the 402 control state machine
         # first read the current PDO setup and only change TPDO1
-        print(self.nmt.state)
-        self.nmt.state = 'PRE-OPERATIONAL'
-        self.tpdo[1].read()
-        self.tpdo[1].clear()
-        # Use register as to stay manufacturer agnostic
-        self.tpdo[1].add_variable(0x6041)
-        # add callback to listen to TPDO1 and change 402 state
-        self.tpdo[1].add_callback(self.powerstate_402.on_PDO1_callback)
-        self.tpdo[1].trans_type = 255
-        self.tpdo[1].enabled = True
-        self.tpdo[1].save()
-        self.nmt.state = 'OPERATIONAL'
+#         print(self.nmt.state)
+#         self.nmt.state = 'PRE-OPERATIONAL'
+#         self.tpdo[1].read()
+#         self.tpdo[1].clear()
+#         # Use register as to stay manufacturer agnostic
+#         self.tpdo[1].add_variable(0x6041)
+#         # add callback to listen to TPDO1 and change 402 state
+#         self.tpdo[1].add_callback(self.powerstate_402.on_PDO1_callback)
+#         self.tpdo[1].trans_type = 255
+#         self.tpdo[1].enabled = True
+#         self.tpdo[1].save()
+#         self.nmt.state = 'OPERATIONAL'
+    
+        for pdo in self.tpdo:
+            pdo.read()
+            if pdo.enabled:
+                try:
+                    pdo[0x6041] # try to access the object
+                    pdo.add_callback(self.powerstate_402.on_PDO1_callback)                    
+                except KeyError as e:
+                    raise
     
     def reset_from_fault(self):
         pass
@@ -109,7 +115,7 @@ class PowerStateMachine(object):
         # Node402.PowerstateMachine._state by reading the statusword
         # The TPDO1 is defined in setup_402_state_machine
         statusword = mapobject[0].raw
-        for key, value in POWER_STATES_402.items():
+        for key, value in POWER_STATES.items():
     		# check if the value after applying the bitmask (value[0])
     		# corresponds with the value[1] to determine the current status
             bitmaskvalue = statusword & value[0]
@@ -141,8 +147,8 @@ class PowerStateMachine(object):
         - 'QUICK STOP ACTIVE'
 
         """
-        if self._state in POWER_STATES_402.values():
-            return POWER_STATES_402[self._state]
+        if self._state in POWER_STATES.values():
+            return POWER_STATES[self._state]
         else:
             return self._state
     
@@ -156,9 +162,4 @@ class PowerStateMachine(object):
         # send the control word in a manufacturer agnostic way
         # by not using the EDS ParameterName but the register number
         self.node.sdo[0x6040].raw = code
-        while node.powerstate_402.state != new_state:
-            if time.time() > timeout:
-                raise Exception('Timeout when trying to change state')
-            
-        
         
