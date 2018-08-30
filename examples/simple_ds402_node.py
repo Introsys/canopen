@@ -51,6 +51,8 @@ try:
 
     node.load_configuration()
 
+    print 'node state 3) = {0}'.format(node.nmt.state)
+
     node.setup_402_state_machine()
 
     device_name = node.sdo[0x1008].raw
@@ -66,9 +68,9 @@ try:
     # Read PDO configuration from node
     node.tpdo.read()
     # Re-map TxPDO1
-    # node.tpdo[1].clear()
-    # node.tpdo[1].add_variable('Statusword')
-    node.pdo.tx[1].add_variable('Velocity actual value')
+    node.tpdo[1].clear()
+    node.tpdo[1].add_variable('Statusword')
+    node.tpdo[1].add_variable('Velocity actual value')
     node.tpdo[1].trans_type = 1
     node.tpdo[1].event_timer = 0
     node.tpdo[1].enabled = True
@@ -98,7 +100,6 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
-    print 'Node state 5) = {0}'.format(node.powerstate_402.state)
 
     timeout = time.time() + 15
     node.powerstate_402.state = 'SWITCHED ON'
@@ -106,7 +107,6 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
-    print 'Node state 6) = {0}'.format(node.powerstate_402.state)
 
     timeout = time.time() + 15
     node.powerstate_402.state = 'OPERATION ENABLED'
@@ -114,15 +114,11 @@ try:
         if time.time() > timeout:
             raise Exception('Timeout when trying to change state')
         time.sleep(0.001)
-    print 'Node state 6) = {0}'.format(node.powerstate_402.state)
-
-
 
     print 'Node Status {0}'.format(node.powerstate_402.state)
 
     # -----------------------------------------------------------------------------------------
     node.nmt.start_node_guarding(0.01)
-    
     while True:
         try:
             network.check()
