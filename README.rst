@@ -66,6 +66,13 @@ Quick start
 
 Here are some quick examples of what you can do:
 
+The PDOs can be access by to forms:
+
+**1st:** :code:`node.tpdo[n]` or :code:`node.rpdo[n]`
+
+**2nd:** :code:`node.pdo.tx[n]` or :code:`node.pdo.rx[n]`
+
+The :code:`n` is the PDO index (normaly 1 to 4). The second form of access is for backward compability.
 
 .. code-block:: python
 
@@ -98,6 +105,7 @@ Here are some quick examples of what you can do:
 
     # Read PDO configuration from node
     node.tpdo.read()
+    node.rpdo.read()
     # Re-map TPDO[1]
     node.tpdo[1].clear()
     node.tpdo[1].add_variable('Statusword')
@@ -107,7 +115,7 @@ Here are some quick examples of what you can do:
     node.tpdo[1].event_timer = 10
     node.tpdo[1].enabled = True
     # Save new PDO configuration to node
-    node.tpdo.save()
+    node.tpdo[1].save()
 
     # Transmit SYNC every 100 ms
     network.sync.start(0.1)
@@ -116,7 +124,7 @@ Here are some quick examples of what you can do:
     node.nmt.state = 'OPERATIONAL'
 
     # Read a value from TPDO[1]
-    node.rpdo[1].wait_for_reception()
+    node.tpdo[1].wait_for_reception()
     speed = node.tpdo[1]['Velocity actual value'].phys
     val = node.tpdo['Some group.Some subindex'].raw
 
