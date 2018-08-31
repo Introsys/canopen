@@ -2,6 +2,8 @@
 import io
 import logging
 import copy
+import re
+
 try:
     from configparser import RawConfigParser, NoOptionError
 except ImportError:
@@ -117,6 +119,7 @@ def import_from_node(node_id, network):
         network.unsubscribe(0x580 + node_id)
     return od
 
+
 def _convert_variable(node_id, var, type, value):
     if type in objectdictionary.DATA_TYPES:
             var = value
@@ -179,6 +182,7 @@ def copy_variable(eds, section, subindex, src_var):
     var.name = name
     var.subindex = subindex
     return var
+
 
 import io
 import logging
@@ -298,16 +302,20 @@ def import_from_node(node_id, network):
         network.unsubscribe(0x580 + node_id)
     return od
 
+
 def _convert_variable(node_id, var, type, value):
     if type in objectdictionary.DATA_TYPES:
             var = value
     elif type in objectdictionary.FLOAT_TYPES:
         var = float(value)
+
+
 def _convert_variable(node_id, var, var_type, value):
     if var_type in objectdictionary.DATA_TYPES:
             var = value
     elif var_type in objectdictionary.FLOAT_TYPES:
         var = float(value)
+
 
 def _convert_variable(node_id, var_type, value):
     if var_type in objectdictionary.DATA_TYPES:
