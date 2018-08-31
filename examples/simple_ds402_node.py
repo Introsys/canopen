@@ -31,10 +31,10 @@ try:
     # Iterate over arrays or records
     error_log = node.sdo[0x1003]
     for error in error_log.values():
-        print("Error {0} was found in the log".format(error.raw))
+        print "Error {0} was found in the log".format(error.raw)
 
     for node_id in network:
-        print(network[node_id])
+        print network[node_id]
 
     print 'node state 2) = {0}'.format(node.nmt.state)
 
@@ -92,7 +92,7 @@ try:
 
     # -----------------------------------------------------------------------------------------
 
-    print ('Node booted up')
+    print 'Node booted up'
 
     timeout = time.time() + 15
     node.powerstate_402.state = 'READY TO SWITCH ON'
