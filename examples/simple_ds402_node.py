@@ -4,6 +4,7 @@ import os
 import traceback
 
 import time
+from canopen.profiles import p402
 
 try:
 
@@ -23,7 +24,7 @@ try:
 
     # Reset network
     node.nmt.state = 'RESET COMMUNICATION'
-    #node.nmt.state = 'RESET'
+    
     node.nmt.wait_for_bootup(15)
 
     print 'node state 1) = {0}'.format(node.nmt.state)
@@ -85,35 +86,19 @@ try:
     node.rpdo[1]['Controlword'].raw = 0x81
     node.rpdo[1].transmit()
 
-    node.powerstate_402.state = 'READY TO SWITCH ON'
-    node.powerstate_402.state = 'SWITCHED ON'
 
     node.rpdo.export('database.dbc')
 
     # -----------------------------------------------------------------------------------------
 
-    print 'Node booted up'
 
-    timeout = time.time() + 15
-    node.powerstate_402.state = 'READY TO SWITCH ON'
-    while node.powerstate_402.state != 'READY TO SWITCH ON':
-        if time.time() > timeout:
-            raise Exception('Timeout when trying to change state')
-        time.sleep(0.001)
+    try:
+        node.powerstate_402.state = 'OPERATION ENABLED'        
+                
+    except RuntimeError as e:
+        print e
+        
 
-    timeout = time.time() + 15
-    node.powerstate_402.state = 'SWITCHED ON'
-    while node.powerstate_402.state != 'SWITCHED ON':
-        if time.time() > timeout:
-            raise Exception('Timeout when trying to change state')
-        time.sleep(0.001)
-
-    timeout = time.time() + 15
-    node.powerstate_402.state = 'OPERATION ENABLED'
-    while node.powerstate_402.state != 'OPERATION ENABLED':
-        if time.time() > timeout:
-            raise Exception('Timeout when trying to change state')
-        time.sleep(0.001)
 
     print 'Node Status {0}'.format(node.powerstate_402.state)
 
@@ -147,12 +132,10 @@ except Exception as e:
 finally:
     # Disconnect from CAN bus
     print 'going to exit... stoping...'
-    if network:
-
+    if network is not None:
         for node_id in network:
             node = network[node_id]
             node.nmt.state = 'PRE-OPERATIONAL'
             node.nmt.stop_node_guarding()
-        network.sync.stop()
         network.disconnect()
 
