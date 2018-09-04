@@ -56,7 +56,9 @@ try:
 
     print 'node state 3) = {0}'.format(node.nmt.state)
 
-    node.setup_powerstate_machine()
+    node.setup_state402_machine()
+    
+    node.change_mode('PROFILED POSITION')
 
     device_name = node.sdo[0x1008].raw
     vendor_id = node.sdo[0x1018][1].raw
@@ -64,7 +66,7 @@ try:
     print device_name
     print vendor_id
 
-    node.powerstate_402.state = 'SWITCH ON DISABLED'
+    node.state = 'SWITCH ON DISABLED'
 
     print 'node state 4) = {0}'.format(node.nmt.state)
 
@@ -95,17 +97,20 @@ try:
 
 
     try:
-        node.powerstate_402.state = 'OPERATION ENABLED'        
+        node.state = 'OPERATION ENABLED'        
                 
     except RuntimeError as e:
         print e
         
 
 
-    print 'Node Status {0}'.format(node.powerstate_402.state)
+    print 'Node Status {0}'.format(node.state)
 
     # -----------------------------------------------------------------------------------------
     node.nmt.start_node_guarding(0.01)
+    
+    time_test = time.time()
+    reseted = False
     while True:
         try:
             network.check()
@@ -116,15 +121,16 @@ try:
         node.tpdo[1].wait_for_reception()
         speed = node.tpdo[1]['Velocity actual value'].phys
 
-        # Read the state of the Statusword
-        statusword = node.sdo[0x6041].raw
-
-        ##print 'statusword: {0}'.format(statusword)
-        ##print 'VEL: {0}'.format(speed)
+        print 'statusword: {0}'.format(node.sw_last_value)
+        print 'VEL: {0}'.format(speed)
 
         time.sleep(0.001)
 
 
+        if time.time() > time_test + 30 and not reseted:
+            print 'GOING TO RESET BIG TIME'
+            node.reset_from_fault()
+            reseted = True
 
 
 

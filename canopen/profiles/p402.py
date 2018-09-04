@@ -2,13 +2,12 @@
 import logging
 import time
 from ..node import RemoteNode
-from wx._animate import AC_DEFAULT_STYLE
-from __builtin__ import isinstance
+from ..sdo import SdoAbortedError, SdoCommunicationError
 
 logger = logging.getLogger(__name__)
 
 # status word 0x6041 bitmask and values in the list in the dictionary value
-POWER_STATES = {
+STATES402 = {
     'NOT READY TO SWITCH ON': [0x4F, 0x00],
     'SWITCH ON DISABLED'    : [0x4F, 0x40],
     'READY TO SWITCH ON'    : [0x6F, 0x21],
@@ -55,22 +54,23 @@ TRANSITIONTABLE = {
     ('SWITCHED ON', 'QUICK STOP ACTIVE'):               0x02,  # transition 10
     ('OPERATION ENABLED', 'QUICK STOP ACTIVE'):         0x02,  # transition 11
     # fault -----------------------------------------------------------------
-    ('FAULT', 'SWITCH ON DISABLED'):            [0x00, 0x80],  # transition 15
+    ('FAULT', 'SWITCH ON DISABLED'):                    0x80,  # transition 15
 }
 
 # Operations sodes
-OPERATIONMODE = {    
-    'NO MODE'                     : 0,
-    'PROFILED POSITION'           : 1,
-    'VELOCITY'                    : 2,
-    'PROFILED VELOCITY'           : 3,
-    'PROFILED TORQUE'             : 4,
-    'RESERVED'                    : 5,
-    'HOMING'                      : 6,
-    'INTERPOLATED POSITION'       : 7,
-    'CYCLIC SYNCHRONOUS POSITION' : 8,
-    'CYCLIC SYNCHRONOUS VELOCITY' : 9,
-    'CYCLIC SYNCHRONOUS TORQUE'   : 10
+OPERATIONMODE = {
+    'NO MODE'                     : 0x00,       # No bit set
+    'PROFILED POSITION'           : 0x01,       # bit 0
+    'VELOCITY'                    : 0x02,       # bit 1
+    'PROFILED VELOCITY'           : 0x04,       # bit 2
+    'PROFILED TORQUE'             : 0x08,       # bit 3
+    'HOMING'                      : 0x20,       # bit 5
+    'INTERPOLATED POSITION'       : 0x40,       # bit 6
+    'CYCLIC SYNCHRONOUS POSITION' : 0x80,       # bit 7
+    'CYCLIC SYNCHRONOUS VELOCITY' : 0x100,      # bit 8 
+    'CYCLIC SYNCHRONOUS TORQUE'   : 0x200,      # bit 9
+    'Open loop scalar mode'       : 0x10000,    # bit 15
+    'Open loop vector mode'       : 0x20000     # bit 16
 }
 
 # homing controlword bit maks
@@ -90,8 +90,6 @@ HOMING_STATES = {
 }
 
 
-
-
 class BaseNode402(RemoteNode):
     """A CANopen CiA 402 profile slave node.
 
@@ -103,33 +101,31 @@ class BaseNode402(RemoteNode):
     :type object_dictionary: :class:`str`, :class:`canopen.ObjectDictionary`
     """
 
-    def __init__(self, node_id, object_dictionary):
+    def __init__(self, node_id, object_dictionary, sm_timeout=15):
         super(BaseNode402, self).__init__(node_id, object_dictionary)
-        self.powerstate_402 = PowerStateMachine(self)
-        self.powerstate_402.network = self.network
+
         self.is_statusword_configured = False
         self.is_controlword_configured = False
-        
-        
-        self.mode_handler = ModeHandler(self)
-        self.mode_handler.network = self.network
-        
 
-    def setup_powerstate_machine(self):
+        self._state = 'NOT READY TO SWITCH ON'
+        self.cw_pdo = None
+        self.sw_last_value = None
+        self.sm_timeout = sm_timeout
+
+    def setup_state402_machine(self):
         """Configured the state machine by searching for the PDO that has the
         StatusWord mappend.
         """
         # the node needs to be in pre-operational mode
         self.nmt.state = 'PRE-OPERATIONAL'
-        self.pdo.read() # read all the PDOs (TPDOs and RPDOs)
+        self.pdo.read()  # read all the PDOs (TPDOs and RPDOs)
         for key, pdo in self.pdo.items():
             if pdo.enabled:
                 if not self.is_statusword_configured:
                     try:
                         # try to access the object, raise exception if does't exist
                         pdo["Statusword"]
-                        pdo.add_callback(self.powerstate_402.on_powerstate_callback)
-                        pdo.add_callback(self.mode_handler.on_statusword_callback)
+                        pdo.add_callback(self.on_statusword_callback)
                         # make sure only one statusword listner is configured by node
                         self.is_statusword_configured = True
                     except KeyError:
@@ -153,38 +149,45 @@ class BaseNode402(RemoteNode):
             logger.info('Statusword configured in TPDO[{id}]'.format(id=key))
         self.nmt.state = 'OPERATIONAL'
 
-
-
-
     def reset_from_fault(self):
-        pass
+        print 'STATE at fault reset {0}'.format(self.state)
+        if self.state == 'FAULT':
+            self.state = 'OPERATION ENABLED'
+        else:
+            logger.info('The node its not at fault. Doing nothing!')
 
     def homing(self):
         pass
 
     def change_mode(self, mode):
-        pass
+        try:
+            state = self.state
+            if self.state == 'OPERATION ENABLED':
+                self.state = 'SWITCHED ON'
+    
+            # set the operation mode in an agnotic way, accessing the SDO object by ID
+            self.sdo[0x6502].raw = OPERATIONMODE[mode]
+            t = time.time() + 0.5 # timeout 
+            while self.sdo[0x6502] == OPERATIONMODE[mode]:
+                if time.time() > t:
+                    logger.error('Timeout setting the new mode of operation at node {0}.'.format(self.id))
+                    break
+            self.state = state  # set to last known state
+            logger.info('Mode of operation of the node {n} is {m}.'.format(n=self.id , m=mode))
 
-
-
-
-class PowerStateMachine(object):
-    """A CANopen CiA 402 Power State machine. Listens to state changes
-    of the DS402 Power State machine by means of the Statusword.
-
-    - Controlword 0x6040 causes transitions
-    - Statusword 0x6041 gives the current state
-
-    """
-
-    def __init__(self, node):
-        self.id = node.id
-        self.node = node
-        self._state = 'NOT READY TO SWITCH ON'
-        self.cw_pdo = None
+        except SdoCommunicationError as e:
+            logger.info(str(e))
+        except SdoAbortedError as e:
+            # WORKAROUND for broken implementations: the SDO is set but the error
+            # "Attempt to write a read-only object" is raised any way.
+            if e.code != 0x06010002:
+                # Abort codes other than "Attempt to write a read-only object"
+                # should still be reported.
+                logger.info('[ERROR SETTING object {0}:{1}]  {2}'.format(subobj.index, subobj.subindex, str(e)))
+                raise
 
     def __next_state_for_enabling(self, _from):
-        """Returns the next state needed for enabling the motor
+        """Returns the next state needed for reach the state Operation Enabled
         :param string target: Target state
         :return string: Next target to chagne
         """
@@ -192,22 +195,34 @@ class PowerStateMachine(object):
             if _from in cond:
                 return next
 
+    def __change_state_helper(self, value):
+        """Helper function enabling the node to send the state using PDO or SDO objects
+        :param int value: State value to send in the message
+        """
+        if self.cw_pdo is not None:
+            self.pdo['Controlword'].raw = value
+            self.cw_pdo.transmit()
+        else:
+            self.sdo[0x6040].raw = value
+
     @staticmethod
-    def on_powerstate_callback(mapobject):
+    def on_statusword_callback(mapobject):
         # this function receives a map object.
         # this map object is then used for changing the
         # BaseNode402.PowerstateMachine._state by reading the statusword
         statusword = mapobject[0].raw
-        for key, value in POWER_STATES.items():
-    		# check if the value after applying the bitmask (value[0])
-    		# corresponds with the value[1] to determine the current status
+        mapobject.pdo_node.node.sw_last_value = statusword
+
+        for key, value in STATES402.items():
+            # check if the value after applying the bitmask (value[0])
+            # corresponds with the value[1] to determine the current status
             bitmaskvalue = statusword & value[0]
             if bitmaskvalue == value[1]:
-                mapobject.pdo_node.node.powerstate_402._state = key
+                mapobject.pdo_node.node._state = key
 
     @property
     def state(self):
-        """Attribute to get or set node's state as a string.
+        """Attribute to get or set node's state as a string for the DS402 State Machine.
 
         States of the node can be one of:
 
@@ -230,17 +245,19 @@ class PowerStateMachine(object):
         - 'QUICK STOP ACTIVE'
 
         """
-        if self._state in POWER_STATES.values():
-            return POWER_STATES[self._state]
+        if self._state in STATES402.values():
+            return STATES402[self._state]
         else:
             return self._state
 
     @state.setter
     def state(self, new_state):
+        """ Defines the state for the DS402 state machine
+        :param string new_state: Target state
+        :raise RuntimeError: Occurs when the time defined to change the state is reached
+        :raise TypeError: Occurs when trying to execute a ilegal transition in the sate machine
         """
-        :param string new_state: Holds the target state
-        """
-        gt = time.time() + 15
+        gt = time.time() + self.sm_timeout
         while self.state != new_state:
             try:
                 if new_state == 'OPERATION ENABLED':
@@ -248,54 +265,17 @@ class PowerStateMachine(object):
                 else:
                     next = new_state
                 code = TRANSITIONTABLE[ (self.state, next) ]
-                if isinstance(code, list):
-                    for n in code:
-                        self.node.sdo[0x6040].raw = n
-                        time.sleep(0.001)
-                else:
-                    self.node.sdo[0x6040].raw = code
+                self.__change_state_helper(code)
                 it = time.time() + 1  # wait one second
                 while self.state != next:
                     if time.time() > it:
                         raise RuntimeError('Timeout when trying to change state')
-                    time.sleep(0.0001)
+                    time.sleep(0.0001)  # give some time to breathe
             except RuntimeError as e:
                 print(e)
             except KeyError:
-                raise('Illegal transaction from {f} to {t}'.format(f=self.state, t=_to))
+                raise TypeError('Illegal transition from {f} to {t}'.format(f=self.state, t=new_state))
             finally:
                 if time.time() > gt:
                     raise RuntimeError('Timeout when trying to change state')
 
-
-
-
-class ModeHandler(object):
-    
-    def __init__(self, node):
-        self.id = node.id
-        self.node = node
-        self.cw_pdo = None
-        self._state = ''
-
-
-    @staticmethod
-    def on_statusword_callback(mapobject):
-        # this function receives a map object.
-        # this map object is then used for changing the
-        # BaseNode402.PowerstateMachine._state by reading the statusword
-        statusword = mapobject[0].raw
-        
-        print 'STATUSWORD: {0}'.format(statusword)
-
-    @property
-    def state(self):
-        return self._state
-
-
-    @state.setter
-    def state(self, new_state):
-        self._state = new_state
-        print 'State {0}'.format(self._state)
-
-# EOF
