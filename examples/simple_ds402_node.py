@@ -56,7 +56,7 @@ try:
 
     print 'node state 3) = {0}'.format(node.nmt.state)
 
-    node.setup_state_machine()
+    node.setup_powerstate_machine()
 
     device_name = node.sdo[0x1008].raw
     vendor_id = node.sdo[0x1018][1].raw
@@ -119,8 +119,8 @@ try:
         # Read the state of the Statusword
         statusword = node.sdo[0x6041].raw
 
-        print 'statusword: {0}'.format(statusword)
-        print 'VEL: {0}'.format(speed)
+        ##print 'statusword: {0}'.format(statusword)
+        ##print 'VEL: {0}'.format(speed)
 
         time.sleep(0.001)
 

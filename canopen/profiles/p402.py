@@ -110,8 +110,12 @@ class BaseNode402(RemoteNode):
         self.is_statusword_configured = False
         self.is_controlword_configured = False
         
+        
+        self.mode_handler = ModeHandler(self)
+        self.mode_handler.network = self.network
+        
 
-    def setup_state_machine(self):
+    def setup_powerstate_machine(self):
         """Configured the state machine by searching for the PDO that has the
         StatusWord mappend.
         """
@@ -124,7 +128,8 @@ class BaseNode402(RemoteNode):
                     try:
                         # try to access the object, raise exception if does't exist
                         pdo["Statusword"]
-                        pdo.add_callback(self.powerstate_402.on_statusword_callback)
+                        pdo.add_callback(self.powerstate_402.on_powerstate_callback)
+                        pdo.add_callback(self.mode_handler.on_statusword_callback)
                         # make sure only one statusword listner is configured by node
                         self.is_statusword_configured = True
                     except KeyError:
@@ -188,7 +193,7 @@ class PowerStateMachine(object):
                 return next
 
     @staticmethod
-    def on_statusword_callback(mapobject):
+    def on_powerstate_callback(mapobject):
         # this function receives a map object.
         # this map object is then used for changing the
         # BaseNode402.PowerstateMachine._state by reading the statusword
@@ -261,5 +266,36 @@ class PowerStateMachine(object):
             finally:
                 if time.time() > gt:
                     raise RuntimeError('Timeout when trying to change state')
+
+
+
+
+class ModeHandler(object):
+    
+    def __init__(self, node):
+        self.id = node.id
+        self.node = node
+        self.cw_pdo = None
+        self._state = ''
+
+
+    @staticmethod
+    def on_statusword_callback(mapobject):
+        # this function receives a map object.
+        # this map object is then used for changing the
+        # BaseNode402.PowerstateMachine._state by reading the statusword
+        statusword = mapobject[0].raw
+        
+        print 'STATUSWORD: {0}'.format(statusword)
+
+    @property
+    def state(self):
+        return self._state
+
+
+    @state.setter
+    def state(self, new_state):
+        self._state = new_state
+        print 'State {0}'.format(self._state)
 
 # EOF
