@@ -1,6 +1,11 @@
 # inspired by the NmtMaster code
-
+import logging
+import time
 from ..node import RemoteNode
+from wx._animate import AC_DEFAULT_STYLE
+from __builtin__ import isinstance
+
+logger = logging.getLogger(__name__)
 
 # status word 0x6041 bitmask and values in the list in the dictionary value
 POWER_STATES = {
@@ -14,14 +19,58 @@ POWER_STATES = {
     'QUICK STOP ACTIVE'     : [0x6F, 0x07]
 }
 
-# control word 0x6040
-POWER_STATE_COMMANDS = {
-    'SWITCH ON DISABLED'    : 0x80,
-    'DISABLE VOLTAGE'       : 0x04,
-    'READY TO SWITCH ON'    : 0x06,
-    'SWITCHED ON'           : 0x07,
-    'OPERATION ENABLED'     : 0x0F,
-    'QUICK STOP ACTIVE'     : 0x02
+# Transition path to enable the DS402 node
+NEXTSTATE2ENABLE = {
+    ('START')                                                   : 'NOT READY TO SWITCH ON',
+    ('FAULT', 'NOT READY TO SWITCH ON')                         : 'SWITCH ON DISABLED',
+    ('SWITCH ON DISABLED')                                      : 'READY TO SWITCH ON',
+    ('READY TO SWITCH ON')                                      : 'SWITCHED ON',
+    ('SWITCHED ON', 'QUICK_STOP_ACTIVE', 'OPERATION_ENABLED')   : 'OPERATION ENABLED',
+    ('FAULT REACTION ACTIVE')                                   : 'FAULT'
+}
+
+# Tansition table from the DS402 State Machine
+TRANSITIONTABLE = {
+    # disable_voltage -------------------------------------------------------
+    ('READY TO SWITCH ON', 'SWITCH ON DISABLED'):       0x00,  # transition 7
+    ('OPERATION ENABLED', 'SWITCH ON DISABLED'):        0x00,  # transition 9
+    ('SWITCHED ON', 'SWITCH ON DISABLED'):              0x00,  # transition 10
+    ('QUICK STOP ACTIVE', 'SWITCH ON DISABLED'):        0x00,  # transition 12
+    # automatic -------------------------------------------------------------
+    ('NOT READY TO SWITCH ON', 'SWITCH ON DISABLED'):   0x00,  # transition 1
+    ('START', 'NOT READY TO SWITCH ON'):                0x00,  # transition 0
+    ('FAULT REACTION ACTIVE', 'FAULT'):                 0x00,  # transition 14
+    # shutdown --------------------------------------------------------------
+    ('SWITCH ON DISABLED', 'READY TO SWITCH ON'):       0x06,  # transition 2
+    ('SWITCHED ON', 'READY TO SWITCH ON'):              0x06,  # transition 6
+    ('OPERATION ENABLED', 'READY TO SWITCH ON'):        0x06,  # transition 8
+    # switch_on -------------------------------------------------------------
+    ('READY TO SWITCH ON', 'SWITCHED ON'):              0x07,  # transition 3
+    ('OPERATION ENABLED', 'SWITCHED ON'):               0x07,  # transition 5
+    # enable_operation ------------------------------------------------------
+    ('SWITCHED ON', 'OPERATION ENABLED'):               0x0F,  # transition 4
+    ('QUICK STOP ACTIVE', 'OPERATION ENABLED'):         0x0F,  # transition 16
+    # quickstop -------------------------------------------------------------
+    ('READY TO SWITCH ON', 'QUICK STOP ACTIVE'):        0x02,  # transition 7
+    ('SWITCHED ON', 'QUICK STOP ACTIVE'):               0x02,  # transition 10
+    ('OPERATION ENABLED', 'QUICK STOP ACTIVE'):         0x02,  # transition 11
+    # fault -----------------------------------------------------------------
+    ('FAULT', 'SWITCH ON DISABLED'):            [0x00, 0x80],  # transition 15
+}
+
+# Operations sodes
+OPERATIONMODE = {    
+    'NO MODE'                     : 0,
+    'PROFILED POSITION'           : 1,
+    'VELOCITY'                    : 2,
+    'PROFILED VELOCITY'           : 3,
+    'PROFILED TORQUE'             : 4,
+    'RESERVED'                    : 5,
+    'HOMING'                      : 6,
+    'INTERPOLATED POSITION'       : 7,
+    'CYCLIC SYNCHRONOUS POSITION' : 8,
+    'CYCLIC SYNCHRONOUS VELOCITY' : 9,
+    'CYCLIC SYNCHRONOUS TORQUE'   : 10
 }
 
 # homing controlword bit maks
@@ -32,8 +81,8 @@ HOMING_COMMANDS = {
 
 # homing statusword bit masks
 HOMING_STATES = {
-    'IN PROGRESS'                           : [0x3400, 0x00],
-    'INTERRUPTED'                           : [0x3400, 0x400],
+    'IN PROGRESS'                           : [0x3400, 0x0000],
+    'INTERRUPTED'                           : [0x3400, 0x0400],
     'ATTAINED TARGET NOT REACHED'           : [0x3400, 0x1000],
     'SUCCESSFULLY'                          : [0x3400, 0x1400],
     'ERROR OCCURRED VELOCITY IS NOT ZERO'   : [0x3400, 0x2000],
@@ -41,7 +90,9 @@ HOMING_STATES = {
 }
 
 
-class Node402(RemoteNode):
+
+
+class BaseNode402(RemoteNode):
     """A CANopen CiA 402 profile slave node.
 
     :param int node_id:
@@ -53,43 +104,52 @@ class Node402(RemoteNode):
     """
 
     def __init__(self, node_id, object_dictionary):
-        super(Node402, self).__init__(node_id, object_dictionary)
+        super(BaseNode402, self).__init__(node_id, object_dictionary)
         self.powerstate_402 = PowerStateMachine(self)
         self.powerstate_402.network = self.network
+        self.is_statusword_configured = False
+        self.is_controlword_configured = False
+        
 
-    def setup_402_state_machine(self):
-        # setup TPDO1 for this node
-        # TPDO1 will transmit the statusword of the 402 control state machine
-        # first read the current PDO setup and only change TPDO1
-
-#        print(self.nmt.state)
-#        self.nmt.state = 'PRE-OPERATIONAL'
-#        self.tpdo[1].read()
-#        self.tpdo[1].clear()
-#        # Use register as to stay manufacturer agnostic
-#        self.tpdo[1].add_variable(0x6041)
-#        # add callback to listen to TPDO1 and change 402 state
-#        self.tpdo[1].add_callback(self.powerstate_402.on_PDO1_callback)
-#        self.tpdo[1].trans_type = 255
-#        self.tpdo[1].enabled = True
-#        self.tpdo[1].save()
-#        self.nmt.state = 'OPERATIONAL'
-
-        print(self.nmt.state)
+    def setup_state_machine(self):
+        """Configured the state machine by searching for the PDO that has the
+        StatusWord mappend.
+        """
+        # the node needs to be in pre-operational mode
         self.nmt.state = 'PRE-OPERATIONAL'
-        self.tpdo.read()
-        for key, pdo in self.tpdo.iteritems():
+        self.pdo.read() # read all the PDOs (TPDOs and RPDOs)
+        for key, pdo in self.pdo.items():
             if pdo.enabled:
-                try:
-                    print pdo
-                    pdo["Statusword"]  # try to access the object
-                    print ("found the 0x6041")
-                    pdo.add_callback(self.powerstate_402.on_PDO1_callback)
-                except KeyError as e:
-                    print e
-                except IndexError as e:
-                    print e
+                if not self.is_statusword_configured:
+                    try:
+                        # try to access the object, raise exception if does't exist
+                        pdo["Statusword"]
+                        pdo.add_callback(self.powerstate_402.on_statusword_callback)
+                        # make sure only one statusword listner is configured by node
+                        self.is_statusword_configured = True
+                    except KeyError:
+                        pass
+                if not self.is_controlword_configured:
+                    try:
+                        # try to access the object, raise exception if does't exist
+                        pdo["Controlword"]
+                        self.cw_pdo = pdo
+                        # make sure only one controlword is configured in the node
+                        self.is_controlword_configured = True
+                    except KeyError:
+                        pass
+        if not self.is_controlword_configured:
+            logger.info('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
+        else:
+            logger.info('Control word configured in RPDO[{id}]'.format(id=key))
+        if not self.is_statusword_configured:
+            raise ValueError('Statusword not configured in this node. Unable to access node status.')
+        else:
+            logger.info('Statusword configured in TPDO[{id}]'.format(id=key))
         self.nmt.state = 'OPERATIONAL'
+
+
+
 
     def reset_from_fault(self):
         pass
@@ -101,9 +161,11 @@ class Node402(RemoteNode):
         pass
 
 
+
+
 class PowerStateMachine(object):
     """A CANopen CiA 402 Power State machine. Listens to state changes
-    of the DS402 Power State machine by means of TPDO 1 Statusword.
+    of the DS402 Power State machine by means of the Statusword.
 
     - Controlword 0x6040 causes transitions
     - Statusword 0x6041 gives the current state
@@ -114,13 +176,22 @@ class PowerStateMachine(object):
         self.id = node.id
         self.node = node
         self._state = 'NOT READY TO SWITCH ON'
+        self.cw_pdo = None
+
+    def __next_state_for_enabling(self, _from):
+        """Returns the next state needed for enabling the motor
+        :param string target: Target state
+        :return string: Next target to chagne
+        """
+        for cond, next in NEXTSTATE2ENABLE.items():
+            if _from in cond:
+                return next
 
     @staticmethod
-    def on_PDO1_callback(mapobject):
+    def on_statusword_callback(mapobject):
         # this function receives a map object.
         # this map object is then used for changing the
-        # Node402.PowerstateMachine._state by reading the statusword
-        # The TPDO1 is defined in setup_402_state_machine
+        # BaseNode402.PowerstateMachine._state by reading the statusword
         statusword = mapobject[0].raw
         for key, value in POWER_STATES.items():
     		# check if the value after applying the bitmask (value[0])
@@ -161,12 +232,34 @@ class PowerStateMachine(object):
 
     @state.setter
     def state(self, new_state):
-        if new_state in POWER_STATE_COMMANDS:
-            code = POWER_STATE_COMMANDS[new_state]
-        else:
-            raise ValueError("'%s' is an invalid state. Must be one of %s." %
-                             (new_state, ", ".join(POWER_STATE_COMMANDS)))
-        # send the control word in a manufacturer agnostic way
-        # by not using the EDS ParameterName but the register number
-        self.node.sdo[0x6040].raw = code
+        """
+        :param string new_state: Holds the target state
+        """
+        gt = time.time() + 15
+        while self.state != new_state:
+            try:
+                if new_state == 'OPERATION ENABLED':
+                    next = self.__next_state_for_enabling(self.state)
+                else:
+                    next = new_state
+                code = TRANSITIONTABLE[ (self.state, next) ]
+                if isinstance(code, list):
+                    for n in code:
+                        self.node.sdo[0x6040].raw = n
+                        time.sleep(0.001)
+                else:
+                    self.node.sdo[0x6040].raw = code
+                it = time.time() + 1  # wait one second
+                while self.state != next:
+                    if time.time() > it:
+                        raise RuntimeError('Timeout when trying to change state')
+                    time.sleep(0.0001)
+            except RuntimeError as e:
+                print(e)
+            except KeyError:
+                raise('Illegal transaction from {f} to {t}'.format(f=self.state, t=_to))
+            finally:
+                if time.time() > gt:
+                    raise RuntimeError('Timeout when trying to change state')
 
+# EOF
