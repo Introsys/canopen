@@ -6,6 +6,8 @@ import traceback
 import time
 from canopen.profiles import p402
 
+
+
 try:
 
     # Start with creating a network representing one CAN bus
@@ -17,7 +19,7 @@ try:
     network.check()
 
     # Add some nodes with corresponding Object Dictionaries
-    node = canopen.Node402(35, '/home/andre/Code/test/jupiter.eds')
+    node = canopen.BaseNode402(35, '/home/andre/Code/test/jupiter.eds')
     network.add_node(node)
     # network.add_node(34, '/home/andre/Code/test/jupiter.eds')
     # node = network[34]
@@ -54,7 +56,7 @@ try:
 
     print 'node state 3) = {0}'.format(node.nmt.state)
 
-    node.setup_402_state_machine()
+    node.setup_state_machine()
 
     device_name = node.sdo[0x1008].raw
     vendor_id = node.sdo[0x1018][1].raw
@@ -121,6 +123,10 @@ try:
         print 'VEL: {0}'.format(speed)
 
         time.sleep(0.001)
+
+
+
+
 
 except KeyboardInterrupt:
     pass
