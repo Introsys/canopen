@@ -5,6 +5,7 @@ import traceback
 
 import time
 from canopen.profiles import p402
+from canopen.profiles.p402 import OPERATIONMODE, STATE402
 
 
 
@@ -54,11 +55,11 @@ try:
 
     node.load_configuration()
 
-    print 'node state 3) = {0}'.format(node.nmt.state)
+    print 'node state 3) = {0}'.format(node.state)
+
 
     node.setup_state402_machine()
-    
-    node.change_mode('PROFILED POSITION')
+    node.set_op_mode(OPERATIONMODE.PROFILED_POSITION)
 
     device_name = node.sdo[0x1008].raw
     vendor_id = node.sdo[0x1018][1].raw
@@ -66,7 +67,7 @@ try:
     print device_name
     print vendor_id
 
-    node.state = 'SWITCH ON DISABLED'
+    
 
     print 'node state 4) = {0}'.format(node.nmt.state)
 
@@ -111,6 +112,9 @@ try:
     
     time_test = time.time()
     reseted = False
+    
+    node.homing()
+    
     while True:
         try:
             network.check()
