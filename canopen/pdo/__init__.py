@@ -1,6 +1,5 @@
 from .base import PdoBase, Maps, Map, Variable
 
-
 import logging
 import collections
 import itertools
@@ -15,11 +14,17 @@ class PDO(PdoBase):
     :param tpdo: TPDO object holding the Transmit PDO mappings
     """
 
-    def __init__(self,node, rpdo, tpdo):
+    def __init__(self, node, rpdo, tpdo):
         super(PDO, self).__init__(node)
         self.rx = rpdo.map
         self.tx = tpdo.map
-        self.map = dict(itertools.chain(self.rx.iteritems(), self.tx.iteritems()))
+
+        self.map = {}
+        # the object 0x1A00 equals to key '1' so we remove 1 from the key
+        for key, value in self.rx.items():
+            self.map[0x1A00 + (key - 1)] = value
+        for key, value in self.tx.items():
+            self.map[0x1600 + (key - 1)] = value
 
 
 class RPDO(PdoBase):
@@ -31,12 +36,12 @@ class RPDO(PdoBase):
         super(RPDO, self).__init__(node)
         self.map = Maps(0x1400, 0x1600, self, 0x200)
         logger.debug('RPDO Map as {0}'.format(len(self.map)))
-        
+
     def stop(self):
         """Stop transmission of all RPDOs.
-        :raise TypeError: Exception is thrown if the node associated with the PDO does not 
+        :raise TypeError: Exception is thrown if the node associated with the PDO does not
         support this function"""
-        if isinstance(canopen.RemoteNode, self.node):
+        if isinstance(self.node, canopen.RemoteNode):
             for pdo in self.map.values():
                 pdo.stop()
         else:
@@ -54,7 +59,7 @@ class TPDO(PdoBase):
 
     def stop(self):
         """Stop transmission of all TPDOs.
-        :raise TypeError: Exception is thrown if the node associated with the PDO does not 
+        :raise TypeError: Exception is thrown if the node associated with the PDO does not
         support this function"""
         if isinstance(canopen.LocalNode, self.node):
             for pdo in self.map.values():
