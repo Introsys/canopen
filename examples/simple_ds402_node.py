@@ -5,9 +5,6 @@ import traceback
 
 import time
 from canopen.profiles import p402
-from canopen.profiles.p402 import OPERATIONMODE, STATE402
-
-
 
 try:
 
@@ -27,7 +24,7 @@ try:
 
     # Reset network
     node.nmt.state = 'RESET COMMUNICATION'
-    
+
     node.nmt.wait_for_bootup(15)
 
     print 'node state 1) = {0}'.format(node.nmt.state)
@@ -57,17 +54,14 @@ try:
 
     print 'node state 3) = {0}'.format(node.state)
 
-
-    node.setup_state402_machine()
-    node.set_op_mode(OPERATIONMODE.PROFILED_POSITION)
+    node.setup_402_state_machine()
+    node.op_mode = 'PROFILED POSITION'
 
     device_name = node.sdo[0x1008].raw
     vendor_id = node.sdo[0x1018][1].raw
 
     print device_name
     print vendor_id
-
-    
 
     print 'node state 4) = {0}'.format(node.nmt.state)
 
@@ -91,30 +85,26 @@ try:
     node.rpdo[1]['Controlword'].raw = 0x81
     node.rpdo[1].transmit()
 
-
     node.rpdo.export('database.dbc')
 
     # -----------------------------------------------------------------------------------------
 
-
     try:
-        node.state = 'OPERATION ENABLED'        
-                
+        node.state = 'OPERATION ENABLED'
+
     except RuntimeError as e:
         print e
-        
-
 
     print 'Node Status {0}'.format(node.state)
 
     # -----------------------------------------------------------------------------------------
     node.nmt.start_node_guarding(0.01)
-    
+
     time_test = time.time()
     reseted = False
-    
+
     node.homing()
-    
+
     while True:
         try:
             network.check()
@@ -125,18 +115,15 @@ try:
         node.tpdo[1].wait_for_reception()
         speed = node.tpdo[1]['Velocity actual value'].phys
 
-        print 'statusword: {0}'.format(node.sw_last_value)
+        print 'statusword: {0}'.format(node.statusword)
         print 'VEL: {0}'.format(speed)
 
         time.sleep(0.001)
 
-
-        if time.time() > time_test + 30 and not reseted:
-            print 'GOING TO RESET BIG TIME'
+        if time.time() > time_test + 120 and not reseted:
+            print 'Test the reset function'
             node.reset_from_fault()
             reseted = True
-
-
 
 except KeyboardInterrupt:
     pass
