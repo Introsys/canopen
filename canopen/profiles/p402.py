@@ -10,20 +10,20 @@ logger = logging.getLogger(__name__)
 class STATE402:
 
     # Control word 0x6040 commands
-    CW_ENABLE_OPERATION = 0x0F
-    CW_SHUTDOWN         = 0x06
-    CW_SWITCH_ON        = 0x07
-    CW_QUICK_STOP       = 0x02
-    CW_DISABLE_VOLTAGE  = 0x00
-    CW_FAULT_RESET      = 0x80
+    CW_OPERATION_ENABLED        = 0x0F
+    CW_SHUTDOWN                 = 0x06
+    CW_SWITCH_ON                = 0x07
+    CW_QUICK_STOP               = 0x02
+    CW_DISABLE_VOLTAGE          = 0x00
+    CW_SWITCH_ON_DISABLED       = 0x80
     
     CW_COMMANDS = {
-        'SWITCH ON DISABLED'    : 0x80, # Reset Fault
-        'DISABLE VOLTAGE'       : 0x00,
-        'READY TO SWITCH ON'    : 0x06,
-        'SWITCHED ON'           : 0x07,
-        'OPERATION ENABLED'     : 0x0F,
-        'QUICK STOP ACTIVE'     : 0x02
+        'SWITCH ON DISABLED'    : CW_SWITCH_ON_DISABLED, # Reset Fault
+        'DISABLE VOLTAGE'       : CW_DISABLE_VOLTAGE,
+        'READY TO SWITCH ON'    : CW_SHUTDOWN,
+        'SWITCHED ON'           : CW_SWITCH_ON,
+        'OPERATION ENABLED'     : CW_OPERATION_ENABLED,
+        'QUICK STOP ACTIVE'     : CW_QUICK_STOP
     }
 
     # Statusword 0x6041 bitmask and values in the list in the dictionary value
@@ -67,14 +67,14 @@ class STATE402:
         ('READY TO SWITCH ON', 'SWITCHED ON'):            CW_SWITCH_ON,         # transition 3
         ('OPERATION ENABLED', 'SWITCHED ON'):             CW_SWITCH_ON,         # transition 5
         # enable_operation --------------------------------------------------------------------
-        ('SWITCHED ON', 'OPERATION ENABLED'):             CW_ENABLE_OPERATION,  # transition 4
-        ('QUICK STOP ACTIVE', 'OPERATION ENABLED'):       CW_ENABLE_OPERATION,  # transition 16
+        ('SWITCHED ON', 'OPERATION ENABLED'):             CW_OPERATION_ENABLED,  # transition 4
+        ('QUICK STOP ACTIVE', 'OPERATION ENABLED'):       CW_OPERATION_ENABLED,  # transition 16
         # quickstop ---------------------------------------------------------------------------
         ('READY TO SWITCH ON', 'QUICK STOP ACTIVE'):      CW_QUICK_STOP,        # transition 7
         ('SWITCHED ON', 'QUICK STOP ACTIVE'):             CW_QUICK_STOP,        # transition 10
         ('OPERATION ENABLED', 'QUICK STOP ACTIVE'):       CW_QUICK_STOP,        # transition 11
         # fault -------------------------------------------------------------------------------
-        ('FAULT', 'SWITCH ON DISABLED'):                  CW_FAULT_RESET,       # transition 15
+        ('FAULT', 'SWITCH ON DISABLED'):                  CW_SWITCH_ON_DISABLED,       # transition 15
     }
 
 
@@ -223,7 +223,7 @@ class BaseNode402(RemoteNode):
         # The homing process will initialize at operation enabled
         self.state = 'OPERATION ENABLED'
         homingstatus = 'IN PROGRESS'
-        self.set_controlword(STATE402.CW_ENABLE_OPERATION | HOMING.CW_START)
+        self.set_controlword(STATE402.CW_OPERATION_ENABLED | HOMING.CW_START)
         t = time.time() + timeout
         try:
             while homingstatus not in ('TARGET REACHED', 'ATTAINED'):
