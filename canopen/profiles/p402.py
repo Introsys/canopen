@@ -194,10 +194,10 @@ class BaseNode402(RemoteNode):
         super(BaseNode402, self).__init__(node_id, object_dictionary)
 
         self.is_statusword_configured = False
-        
-        self._state = 'NOT READY TO SWITCH ON'
-        
+
+        #: List of values obtained by the configured TPDOs in a dictionary {object (hex), value}
         self.tpdo_values = {}
+        #! list of mapped objects configured in the RPDOs in a dictionary {object (hex, pointer (RPDO object) }
         self.rpdo_pointers = {}
 
     def setup_402_state_machine(self):
@@ -209,29 +209,31 @@ class BaseNode402(RemoteNode):
         # the node needs to be in pre-operational mode
         self.nmt.state = 'PRE-OPERATIONAL'
         self.pdo.read()  # read all the PDOs (TPDOs and RPDOs)
-
-        for key, tpdo in self.tpdo.items():
+        #
+        for tpdo in self.tpdo.values():
             if tpdo.enabled:
                 tpdo.add_callback(self.on_TPDOs_update_callback)
-                
                 for obj in tpdo:
-                    print 'TPDO: {0}'.format(obj.index)
-                    self.tpdo_values[obj.index] = 0x0
-            
-        for key, rpdo in self.rpdo.items():
+                    logger.debug('Configured TPDO: {0}'.format(obj.index))
+                    if obj.index not in self.tpdo_values:
+                        self.tpdo_values[obj.index] = 0
+        #
+        for rpdo in self.rpdo.values():
             for obj in rpdo:
-                print 'RPDO: {0}'.format(obj.index)
-                self.rpdo_pointers[obj.index] = rpdo
-       
+                logger.debug('Configured RPDO: {0}'.format(obj.index))
+                if obj.index not in self.rpdo_pointers:
+                    self.rpdo_pointers[obj.index] = rpdo
+
         # Check if the Controlword is configured
         if 0x6040 not in self.rpdo_pointers:
             raise ValueError('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
-        
+
         # Check if the Statusword is configured
         if 0x6041 not in self.tpdo_values:
             raise ValueError('Statusword not configured in this node. Unable to access node status.')
-        
-        self.nmt.state = 'OPERATIONAL'        
+
+        # Set nmt state and set the DS402 not to switch on disabled
+        self.nmt.state = 'OPERATIONAL'
         self.state = 'SWITCH ON DISABLED'
 
     def reset_from_fault(self):
@@ -370,23 +372,18 @@ class BaseNode402(RemoteNode):
             if _from in cond:
                 return next_state
 
-    
     def on_TPDOs_update_callback(self, mapobject):
         """This function receives a map object.
         this map object is then used for changing the
         :param mapobject: :class: `canopen.objectdictionary.Variable`
         """
-        
-        for map in mapobject:                
-            self.tpdo_values[map.index] = map.raw
-                
 
-        
+        for map in mapobject:
+            self.tpdo_values[map.index] = map.raw
+
     @property
     def statusword(self):
         return self.tpdo_values[0x6041]
-
-
 
     @statusword.setter
     def statusword(self, value):
@@ -401,18 +398,11 @@ class BaseNode402(RemoteNode):
         """Helper function enabling the node to send the state using PDO or SDO objects
         :param int value: State value to send in the message
         """
-        try:
-        
-            if 0x6040 in self.rpdo_pointers:
-                print 'BODA'
-                self.rpdo_pointers[0x6040][0x6040].raw = value
-                self.rpdo_pointers[0x6040].transmit()
-                print 'BODA 2'
-            else:
-                self.sdo[0x6040].raw = value
-
-        except Exception as ex:
-            print str(ex)
+        if 0x6040 in self.rpdo_pointers:
+            self.rpdo_pointers[0x6040][0x6040].raw = value
+            self.rpdo_pointers[0x6040].transmit()
+        else:
+            self.sdo[0x6040].raw = value
 
     @property
     def state(self):
@@ -446,8 +436,7 @@ class BaseNode402(RemoteNode):
             if bitmaskvalue == value[1]:
                 return key
         return 'UNKNOWN'
-            
-        
+
     @state.setter
     def state(self, new_state):
         """ Defines the state for the DS402 state machine
