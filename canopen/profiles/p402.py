@@ -194,11 +194,11 @@ class BaseNode402(RemoteNode):
         super(BaseNode402, self).__init__(node_id, object_dictionary)
 
         self.is_statusword_configured = False
-        self.is_controlword_configured = False
-
+        
         self._state = 'NOT READY TO SWITCH ON'
-        self.cw_pdo = None
-        self._sw_last_value = None
+        
+        self.tpdo_values = {}
+        self.rpdo_pointers = {}
 
     def setup_402_state_machine(self):
         """Configured the state machine by searching for the PDO that has the
@@ -210,37 +210,28 @@ class BaseNode402(RemoteNode):
         self.nmt.state = 'PRE-OPERATIONAL'
         self.pdo.read()  # read all the PDOs (TPDOs and RPDOs)
 
-        for key, ipdo in self.pdo.items():
-            if ipdo.enabled:
-                # try to find the statusword
-                try:
-                    # try to access the object, raise exception if does't exist
-                    if not self.is_statusword_configured and ipdo[0x6041] is not None:
-                        ipdo.add_callback(self.on_statusword_callback)
-                        # make sure only one statusword listner is configured by node
-                        self.is_statusword_configured = True
-                except KeyError:
-                    pass
-                # try to find the controlword
-                try:
-                    # try to access the object, raise exception if does't exist
-                    if not self.is_controlword_configured and ipdo[0x6040] is not None:
-                        self.cw_pdo = key
-                        # make sure only one controlword is configured in the node
-                        self.is_controlword_configured = True
-                except KeyError:
-                    pass
+        for key, tpdo in self.tpdo.items():
+            if tpdo.enabled:
+                tpdo.add_callback(self.on_TPDOs_update_callback)
+                
+                for obj in tpdo:
+                    print 'TPDO: {0}'.format(obj.index)
+                    self.tpdo_values[obj.index] = 0x0
+            
+        for key, rpdo in self.rpdo.items():
+            for obj in rpdo:
+                print 'RPDO: {0}'.format(obj.index)
+                self.rpdo_pointers[obj.index] = rpdo
+       
         # Check if the Controlword is configured
-        if not self.is_controlword_configured:
-            logger.info('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
-        else:
-            logger.info('Controlword configured in RPDO[{id}]'.format(id=key))
+        if 0x6040 not in self.rpdo_pointers:
+            raise ValueError('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
+        
         # Check if the Statusword is configured
-        if not self.is_statusword_configured:
+        if 0x6041 not in self.tpdo_values:
             raise ValueError('Statusword not configured in this node. Unable to access node status.')
-        else:
-            logger.info('Statusword configured in TPDO[{id}]'.format(id=key))
-        self.nmt.state = 'OPERATIONAL'
+        
+        self.nmt.state = 'OPERATIONAL'        
         self.state = 'SWITCH ON DISABLED'
 
     def reset_from_fault(self):
@@ -379,27 +370,23 @@ class BaseNode402(RemoteNode):
             if _from in cond:
                 return next_state
 
-    @staticmethod
-    def on_statusword_callback(mapobject):
+    
+    def on_TPDOs_update_callback(self, mapobject):
         """This function receives a map object.
         this map object is then used for changing the
         :param mapobject: :class: `canopen.objectdictionary.Variable`
         """
-        try:
-            statusword = mapobject[0x6041].raw
-            mapobject.pdo_node.node._sw_last_value = statusword
-            for key, value in State402.SW_MASK.items():
-                # check if the value after applying the bitmask (value[0])
-                # corresponds with the value[1] to determine the current status
-                bitmaskvalue = statusword & value[0]
-                if bitmaskvalue == value[1]:
-                    mapobject.pdo_node.node._state = key
-        except (KeyError, ValueError):
-            raise RuntimeError('The status word is not configured in this mapobject.')
+        
+        for map in mapobject:                
+            self.tpdo_values[map.index] = map.raw
+                
 
+        
     @property
     def statusword(self):
-        return self._sw_last_value
+        return self.tpdo_values[0x6041]
+
+
 
     @statusword.setter
     def statusword(self, value):
@@ -414,12 +401,18 @@ class BaseNode402(RemoteNode):
         """Helper function enabling the node to send the state using PDO or SDO objects
         :param int value: State value to send in the message
         """
+        try:
+        
+            if 0x6040 in self.rpdo_pointers:
+                print 'BODA'
+                self.rpdo_pointers[0x6040][0x6040].raw = value
+                self.rpdo_pointers[0x6040].transmit()
+                print 'BODA 2'
+            else:
+                self.sdo[0x6040].raw = value
 
-        if self.cw_pdo is not None:
-            self.pdo[self.cw_pdo][0x6040].raw = value
-            self.pdo[self.cw_pdo].transmit()
-        else:
-            self.sdo[0x6040].raw = value
+        except Exception as ex:
+            print str(ex)
 
     @property
     def state(self):
@@ -446,11 +439,15 @@ class BaseNode402(RemoteNode):
         - 'QUICK STOP ACTIVE'
 
         """
-        if self._state in State402.CW_COMMANDS_CODE.values():
-            return State402.CW_CODE_COMMANDS[self._state]
-        else:
-            return self._state
-
+        for key, value in State402.SW_MASK.items():
+            # check if the value after applying the bitmask (value[0])
+            # corresponds with the value[1] to determine the current status
+            bitmaskvalue = self.statusword & value[0]
+            if bitmaskvalue == value[1]:
+                return key
+        return 'UNKNOWN'
+            
+        
     @state.setter
     def state(self, new_state):
         """ Defines the state for the DS402 state machine
@@ -459,7 +456,7 @@ class BaseNode402(RemoteNode):
         :raise RuntimeError: Occurs when the time defined to change the state is reached
         :raise TypeError: Occurs when trying to execute a ilegal transition in the sate machine
         """
-        t_to_new_state = time.time() + 0.8  # 800 milliseconds tiemout
+        t_to_new_state = time.time() + 8  # 800 milliseconds tiemout
         while self.state != new_state:
             try:
                 if new_state == 'OPERATION ENABLED':
