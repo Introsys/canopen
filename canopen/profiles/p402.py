@@ -449,7 +449,7 @@ class BaseNode402(RemoteNode):
         while self.state != new_state:
             try:
                 if new_state == 'OPERATION ENABLED':
-                    next_state = self.__next_state_for_enabling(self.state)
+                    next_state = self._next_state_for_enabling(self.state)
                 else:
                     next_state = new_state
                 # get the code from the transition table
