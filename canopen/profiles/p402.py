@@ -53,7 +53,7 @@ class State402(object):
         ('FAULT', 'NOT READY TO SWITCH ON')                         : 'SWITCH ON DISABLED',
         ('SWITCH ON DISABLED')                                      : 'READY TO SWITCH ON',
         ('READY TO SWITCH ON')                                      : 'SWITCHED ON',
-        ('SWITCHED ON', 'QUICK_STOP_ACTIVE', 'OPERATION_ENABLED')   : 'OPERATION ENABLED',
+        ('SWITCHED ON', 'QUICK STOP ACTIVE', 'OPERATION ENABLED')   : 'OPERATION ENABLED',
         ('FAULT REACTION ACTIVE')                                   : 'FAULT'
     }
 
@@ -194,13 +194,11 @@ class BaseNode402(RemoteNode):
         super(BaseNode402, self).__init__(node_id, object_dictionary)
 
         self.is_statusword_configured = False
-        self.is_controlword_configured = False
 
-        self._state = 'NOT READY TO SWITCH ON'
-        self.cw_pdo = None
-        self._sw_last_value = None
-
-        self.state_timeout = 5
+        #: List of values obtained by the configured TPDOs in a dictionary {object (hex), value}
+        self.tpdo_values = {}
+        #! list of mapped objects configured in the RPDOs in a dictionary {object (hex, pointer (RPDO object) }
+        self.rpdo_pointers = {}
 
     def setup_402_state_machine(self):
         """Configured the state machine by searching for the PDO that has the
@@ -211,36 +209,30 @@ class BaseNode402(RemoteNode):
         # the node needs to be in pre-operational mode
         self.nmt.state = 'PRE-OPERATIONAL'
         self.pdo.read()  # read all the PDOs (TPDOs and RPDOs)
+        #
+        for tpdo in self.tpdo.values():
+            if tpdo.enabled:
+                tpdo.add_callback(self.on_TPDOs_update_callback)
+                for obj in tpdo:
+                    logger.debug('Configured TPDO: {0}'.format(obj.index))
+                    if obj.index not in self.tpdo_values:
+                        self.tpdo_values[obj.index] = 0
+        #
+        for rpdo in self.rpdo.values():
+            for obj in rpdo:
+                logger.debug('Configured RPDO: {0}'.format(obj.index))
+                if obj.index not in self.rpdo_pointers:
+                    self.rpdo_pointers[obj.index] = rpdo
 
-        for key, ipdo in self.pdo.items():
-            if ipdo.enabled:
-                if not self.is_statusword_configured:
-                    try:
-                        # try to access the object, raise exception if does't exist
-                        ipdo[0x6041].add_callback(self.on_statusword_callback)
-                        # make sure only one statusword listner is configured by node
-                        self.is_statusword_configured = True
-                    except KeyError:
-                        pass
-                if not self.is_controlword_configured:
-                    try:
-                        # try to access the object, raise exception if does't exist
-                        if ipdo[0x6040] is not None:
-                            self.cw_pdo = ipdo
-                        # make sure only one controlword is configured in the node
-                        self.is_controlword_configured = True
-                    except KeyError:
-                        pass
         # Check if the Controlword is configured
-        if not self.is_controlword_configured:
-            logger.info('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
-        else:
-            logger.info('Controlword configured in RPDO[{id}]'.format(id=key))
+        if 0x6040 not in self.rpdo_pointers:
+            raise ValueError('Controlword not configured in the PDOs of this node, using SDOs to set Controlword')
+
         # Check if the Statusword is configured
-        if not self.is_statusword_configured:
+        if 0x6041 not in self.tpdo_values:
             raise ValueError('Statusword not configured in this node. Unable to access node status.')
-        else:
-            logger.info('Statusword configured in TPDO[{id}]'.format(id=key))
+
+        # Set nmt state and set the DS402 not to switch on disabled
         self.nmt.state = 'OPERATIONAL'
         self.state = 'SWITCH ON DISABLED'
 
@@ -248,6 +240,14 @@ class BaseNode402(RemoteNode):
         """Reset node from fault and set it to Operation Enable state
         """
         if self.state == 'FAULT':
+            # particular case, it resets the Fault Reset bit (rising edge 0 -> 1)
+            self.controlword = State402.CW_DISABLE_VOLTAGE
+            timeout = time.time() + 0.4  # 400 milliseconds
+            # Check if the Fault Reset bit is still = 1
+            while self.statusword & State402.SW_MASK['FAULT'][0] == State402.SW_MASK['FAULT'][1]:
+                if time.time() > timeout:
+                    break
+                time.sleep(0.01)  # 10 milliseconds
             self.state = 'OPERATION ENABLED'
         else:
             logger.info('The node its not at fault. Doing nothing!')
@@ -274,7 +274,7 @@ class BaseNode402(RemoteNode):
                 for key, value in Homing.STATES.items():
                     # check if the value after applying the bitmask (value[0])
                     # corresponds with the value[1] to determine the current status
-                    bitmaskvalue = self._sw_last_value & value[0]
+                    bitmaskvalue = self.statusword & value[0]
                     if bitmaskvalue == value[1]:
                         homingstatus = key
                 if homingstatus in ('INTERRUPTED', 'ERROR VELOCITY IS NOT ZERO', 'ERROR VELOCITY IS ZERO'):
@@ -347,7 +347,7 @@ class BaseNode402(RemoteNode):
             result = True
         except SdoCommunicationError as e:
             logger.warning('[SDO communication error] Cause: {0}'.format(str(e)))
-        except (RuntimeError, TypeError) as e:
+        except (RuntimeError, ValueError) as e:
             logger.warning('{0}'.format(str(e)))
         finally:
             self.state = state  # set to last known state
@@ -372,9 +372,18 @@ class BaseNode402(RemoteNode):
             if _from in cond:
                 return next_state
 
+    def on_TPDOs_update_callback(self, mapobject):
+        """This function receives a map object.
+        this map object is then used for changing the
+        :param mapobject: :class: `canopen.objectdictionary.Variable`
+        """
+
+        for map in mapobject:
+            self.tpdo_values[map.index] = map.raw
+
     @property
     def statusword(self):
-        return self._sw_last_value
+        return self.tpdo_values[0x6041]
 
     @statusword.setter
     def statusword(self, value):
@@ -389,26 +398,11 @@ class BaseNode402(RemoteNode):
         """Helper function enabling the node to send the state using PDO or SDO objects
         :param int value: State value to send in the message
         """
-        if self.cw_pdo is not None:
-            self.pdo[0x6040].raw = value
-            self.cw_pdo.transmit()
+        if 0x6040 in self.rpdo_pointers:
+            self.rpdo_pointers[0x6040][0x6040].raw = value
+            self.rpdo_pointers[0x6040].transmit()
         else:
             self.sdo[0x6040].raw = value
-
-    @staticmethod
-    def on_statusword_callback(mapobject):
-        # this function receives a map object.
-        # this map object is then used for changing the
-        # _state and _sw_last_value by reading the statusword
-        statusword = mapobject[0].raw
-        mapobject.pdo_node.node._sw_last_value = statusword
-
-        for key, value in State402.SW_MASK.items():
-            # check if the value after applying the bitmask (value[0])
-            # corresponds with the value[1] to determine the current status
-            bitmaskvalue = statusword & value[0]
-            if bitmaskvalue == value[1]:
-                mapobject.pdo_node.node._state = key
 
     @property
     def state(self):
@@ -435,10 +429,13 @@ class BaseNode402(RemoteNode):
         - 'QUICK STOP ACTIVE'
 
         """
-        if self._state in State402.CW_COMMANDS_CODE.values():
-            return State402.CW_CODE_COMMANDS[self._state]
-        else:
-            return self._state
+        for key, value in State402.SW_MASK.items():
+            # check if the value after applying the bitmask (value[0])
+            # corresponds with the value[1] to determine the current status
+            bitmaskvalue = self.statusword & value[0]
+            if bitmaskvalue == value[1]:
+                return key
+        return 'UNKNOWN'
 
     @state.setter
     def state(self, new_state):
@@ -448,25 +445,27 @@ class BaseNode402(RemoteNode):
         :raise RuntimeError: Occurs when the time defined to change the state is reached
         :raise TypeError: Occurs when trying to execute a ilegal transition in the sate machine
         """
-        st = time.time() + self.state_timeout
+        t_to_new_state = time.time() + 8  # 800 milliseconds tiemout
         while self.state != new_state:
             try:
                 if new_state == 'OPERATION ENABLED':
                     next_state = self.__next_state_for_enabling(self.state)
                 else:
                     next_state = new_state
+                # get the code from the transition table
                 code = State402.TRANSITIONTABLE[ (self.state, next_state) ]
+                # set the control word
                 self.controlword = code
-                it = time.time() + 1  # wait one second
+                # timeout of 400 milliseconds to try set the next state
+                t_to_next_state = time.time() + 0.4
                 while self.state != next_state:
-                    if time.time() > it:
-                        raise RuntimeError('Timeout when trying to change state')
-                    time.sleep(0.00001)  # give some time to breathe
-            except RuntimeError as e:
-                logger.info(str(e))
+                    if time.time() > t_to_next_state:
+                        break
+                    time.sleep(0.01)  # 10 milliseconds of sleep
             except KeyError:
-                raise TypeError('Illegal transition from {f} to {t}'.format(f=self.state, t=new_state))
-            finally:
-                if time.time() > st:
-                    raise RuntimeError('Timeout when trying to change state')
+                raise ValueError('Illegal transition from {f} to {t}'.format(f=self.state, t=new_state))
+            # check the timeout
+            if time.time() > t_to_new_state:
+                raise RuntimeError('Timeout when trying to change state')
+            time.sleep(0.01)  # 10 miliseconds of sleep
 
