@@ -274,7 +274,7 @@ class BaseNode402(RemoteNode):
                 for key, value in Homing.STATES.items():
                     # check if the value after applying the bitmask (value[0])
                     # corresponds with the value[1] to determine the current status
-                    bitmaskvalue = self._sw_last_value & value[0]
+                    bitmaskvalue = self.statusword & value[0]
                     if bitmaskvalue == value[1]:
                         homingstatus = key
                 if homingstatus in ('INTERRUPTED', 'ERROR VELOCITY IS NOT ZERO', 'ERROR VELOCITY IS ZERO'):
