@@ -120,7 +120,6 @@ class RemoteNode(BaseNode):
                 # should still be reported.
                 logger.warning('[ERROR SETTING object {0:#06x}:{1:#06x}]  {2}'.format(index, subindex, str(e)))
                 raise
-        
 
     def load_configuration(self):
         ''' Load the configuration of the node from the object dictionary.'''
@@ -131,4 +130,4 @@ class RemoteNode(BaseNode):
                         self.__load_configuration_helper(subobj.index, subobj.subindex, subobj.name, subobj.value)
             elif isinstance(obj, Variable) and obj.writable and (obj.value is not None):
                 self.__load_configuration_helper(obj.index, None, obj.name, obj.value)
-        self.pdo.read() # reads the new configuration from the driver
+        self.pdo.read()  # reads the new configuration from the driver
