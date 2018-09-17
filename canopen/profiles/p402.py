@@ -373,7 +373,6 @@ class BaseNode402(RemoteNode):
         mode_support = (self.sdo[0x6502].raw & OperationMode.SUPPORTED[mode])
         return mode_support == OperationMode.SUPPORTED[mode]
 
-
     def on_TPDOs_update_callback(self, mapobject):
         """This function receives a map object.
         this map object is then used for changing the
@@ -389,13 +388,12 @@ class BaseNode402(RemoteNode):
         """
         try:
             return self.tpdo_values[0x6041]
-        except KeyError: 
+        except KeyError:
             raise KeyError('The object 0x6041 (Statusword) is not configured in this device.')
-        
 
     @statusword.setter
     def statusword(self, value):
-        raise RuntimeError('This property has no setter.')
+        raise RuntimeError('This property has no setter. The value {0} will be discarded'.format(value))
 
     @property
     def controlword(self):
