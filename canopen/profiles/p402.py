@@ -391,10 +391,6 @@ class BaseNode402(RemoteNode):
         except KeyError:
             raise KeyError('The object 0x6041 (Statusword) is not configured in this device.')
 
-    @statusword.setter
-    def statusword(self, value):
-        raise RuntimeError('This property has no setter. The value {0} will be discarded'.format(value))
-
     @property
     def controlword(self):
         raise RuntimeError('This property has no getter.')
@@ -406,7 +402,7 @@ class BaseNode402(RemoteNode):
         """
         if 0x6040 in self.rpdo_pointers:
             self.rpdo_pointers[0x6040].raw = value
-            self.rpdo_pointers[0x6040].msg.transmit()
+            self.rpdo_pointers[0x6040].pdo_parent.transmit()
         else:
             self.sdo[0x6040].raw = value
 

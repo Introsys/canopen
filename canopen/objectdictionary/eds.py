@@ -13,6 +13,7 @@ from canopen.sdo import SdoClient
 
 logger = logging.getLogger(__name__)
 
+DOMAIN = 2
 VAR = 7
 ARR = 8
 RECORD = 9
@@ -50,7 +51,7 @@ def import_eds(source, node_id):
                 # "ObjectType=0x7" (=VAR).
                 object_type = VAR
 
-            if object_type == VAR:
+            if object_type in (VAR, DOMAIN):
                 var = build_variable(eds, section, node_id, index)
                 od.add_object(var)
             elif object_type == ARR and eds.has_option(section, "CompactSubObj"):
